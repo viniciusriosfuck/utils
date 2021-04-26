@@ -84,6 +84,24 @@ def minimum_example_df():
         })
     return df
 
+def move_legend(ax, new_loc, **kws):
+    """
+    moves a sns legend
+    
+    # examples:
+        # move_legend(ax, "upper left")
+    
+    # out of the graph area
+        move_legend(ax, "upper left", bbox_to_anchor=(1.04,1))
+    
+    # src: https://github.com/mwaskom/seaborn/issues/2280
+    """
+    old_legend = ax.legend_
+    handles = old_legend.legendHandles
+    labels = [t.get_text() for t in old_legend.get_texts()]
+    title = old_legend.get_title().get_text()   
+    ax.legend(handles, labels, loc=new_loc, title=title, **kws)
+    pass
 
 def display_side_by_side(dfs:list, captions:list):
     """Display tables side by side to save vertical space
@@ -514,7 +532,7 @@ def make_confusion_matrix(cf,
                           categories='auto',
                           count=True,
                           percent=True,
-                          cbar=True,
+                          cbar=False,
                           xyticks=True,
                           xyplotlabels=True,
                           sum_stats=True,
@@ -531,7 +549,7 @@ def make_confusion_matrix(cf,
     count:         If True, show the raw number in the confusion matrix. Default is True.
     normalize:     If True, show the proportions for each category. Default is True.
     cbar:          If True, show the color bar. The cbar values are based off the values in the confusion matrix.
-                   Default is True.
+                   Default is False.
     xyticks:       If True, show x and y ticks. Default is True.
     xyplotlabels:  If True, show 'True Label' and 'Predicted Label' on the figure. Default is True.
     sum_stats:     If True, display summary statistics below the figure. Default is True.
@@ -596,11 +614,17 @@ def make_confusion_matrix(cf,
         #if it is a binary confusion matrix, show some more stats
         if len(cf)==2:
             #Metrics for Binary Confusion Matrices
-            precision = cf[1,1] / sum(cf[:,1])
-            recall    = cf[1,1] / sum(cf[1,:])
-            f1_score  = 2*precision*recall / (precision + recall)
-            stats_text = "\n\nAccuracy={:0.3f}\nPrecision={:0.3f}\nRecall={:0.3f}\nF1 Score={:0.3f}".format(
-                accuracy,precision,recall,f1_score)
+            tn, fp, fn, tp = cf.ravel()
+            
+            # precision = cf[1,1] / sum(cf[:,1])
+            precision = tp/(tp+fp)
+            # recall    = cf[1,1] / sum(cf[1,:])
+            recall    = tp/(tp+fn)
+            #f1_score  = 2*precision*recall/(precision+recall)
+            f1_score  = 2*tp/(2*tp+fp+fn)
+            mcc = (tp*tn-fp*fn)/np.sqrt((tp+fp)*(tp+fn)*(tn+fp)*(tn+fn))
+            stats_text = "\n\nAccuracy={:0.3f}\nPrecision={:0.3f}\nRecall={:0.3f}\nF1 Score={:0.3f}\nMCC={:0.3f}".format(
+                accuracy, precision, recall, f1_score, mcc)
         else:
             stats_text = "\n\nAccuracy={:0.3f}".format(accuracy)
     else:
@@ -934,7 +958,19 @@ def plot_top(df, col, ax, n=10, normalize=True):
     pass
 
 
-def cross_tab(df, col1, col2):
+def df_total_row_col(df,row=True,col=True):
+    """ Add total row and col to a daftaframe
+    """
+
+    df_out = df.copy()
+    df_out.loc['Column_Total']= df_out.sum(numeric_only=True, axis=0)
+    df_out.loc[:,'Row_Total'] = df_out.sum(numeric_only=True, axis=1)
+
+    return df_out
+
+
+
+def cross_tab(df, col1, col2, total_row_col=True, plot=True, table=True):
     """ Compare two (categorical) variables by a stacked barplot and cross table
 
     Args:
@@ -965,17 +1001,28 @@ def cross_tab(df, col1, col2):
         c	7	10	7
     """
     import pandas as pd
+    import matplotlib.pyplot as plt
     
     
     cross_col1_col2 = pd.crosstab(
         index=df[col1]
         , columns=df[col2]
         )
-    display(cross_col1_col2 )
-    cross_col1_col2.plot(
-        kind="bar"
-        , stacked=True
-    );
+    
+    if plot:
+        cross_col1_col2.plot(
+            kind="bar"
+            , stacked=True
+        )
+        ax = plt.gca()
+        move_legend(ax, "upper left", bbox_to_anchor=(1.04,1))
+    # plt.show()
+    
+    cross_col1_col2 = df_total_row_col(cross_col1_col2,row=True,col=True)
+    
+    if table:
+        display(cross_col1_col2)
+    
     return cross_col1_col2
 
 
@@ -1070,15 +1117,15 @@ def check_miss_data(df):
   
     return missing_data
 
-def get_initial_dates(df, index, data_started_lin):
+def get_initial_dates(df, index, data_started_lin=0):
     """
     Args:
         df: pd.DataFrame
         index: col with dates
         data_started_lin: int where data starts (raw data)
         
-        # Make list from repeated values
-        # https://stackoverflow.com/questions/31796973/pandas-dataframe-combining-one-columns-values-with-same-index-into-list
+    Make list from repeated values
+    https://stackoverflow.com/questions/31796973/pandas-dataframe-combining-one-columns-values-with-same-index-into-list
     """
     missing_data = check_miss_data(df)
     missing_data.index.name = "Name"
@@ -1087,7 +1134,7 @@ def get_initial_dates(df, index, data_started_lin):
     initial_dates_agg['initial_lin'] = initial_dates_agg.index+data_started_lin
     initial_dates_agg.set_index("date",inplace=True)
     
-    return initial_dates_agg  
+    return initial_dates_agg
 
 
 def display_full(x):
@@ -1142,7 +1189,7 @@ def plot_heatmap_nr(corr_mat, figsize=(6, 6)):
     import seaborn as sns
 
 
-    mask = np.triu(np.ones_like(corr_mat, dtype=np.bool))
+    mask = np.triu(np.ones_like(corr_mat, dtype=bool))
     # Set up the matplotlib figure
     f, ax = plt.subplots(figsize=figsize)
     # Draw the heatmap with the mask and correct aspect ratio
@@ -1229,17 +1276,19 @@ def prevalent_analysis(df):
     pass
     
     
-def label_encode_categorical_values(df, index):
+def label_encode_categorical_values(df, index, plot=True):
     """
         Args:
             df: pd.DataFrame
             index: string (col_name as data index)
         Return:
             df_encoded: label encoding
-            lst_dct_strings: dict mapping
+            dct_encoding: dict mapping
     """
     import pandas as pd
     import matplotlib.pyplot as plt
+    
+    import seaborn as sns
     
     
     df_encoded = df.copy()
@@ -1249,27 +1298,48 @@ def label_encode_categorical_values(df, index):
         exclude=None
     ).columns.to_list()
 
-    lst_dct_strings = []
+    dct_encoding = {}
     for idx, col in enumerate(lst_col_string):
         dct = pd.DataFrame(
             {"name":df[col],
              "code":df[col].astype('category').cat.codes}
         ).drop_duplicates().set_index("name").to_dict()['code']
-        lst_dct_strings.append({col: dct})
+        # lst_dct_strings.append({col: dct})
+        # https://stackoverflow.com/questions/613183/how-do-i-sort-a-dictionary-by-value
+        dct = dict(sorted(dct.items(), key=lambda item: item[1]))      
+        dct_encoding[col] = dct
         df_encoded[col] = df_encoded[col].map(dct)
+        
+        if plot:          
+            fig, ax = plt.subplots()
+            sns.scatterplot(
+                data=df,
+                x=index,
+                y=col,
+                hue=col,
+                legend=False
+            )
+            # move_legend(ax, "upper left", bbox_to_anchor=(1.04,1))
+            plt.show()
+            
+            sns.countplot(
+                data=df,
+                y=col
+            )
+            plt.show()
+            
+#             positions = tuple(dct.values())
+#             labels = dct.keys()
+#             df_encoded.plot(x=index,y=col)
+#             plt.yticks(positions, labels)
+#             plt.title(col)
+#             plt.show()
 
-        positions = tuple(dct.values())
-        labels = dct.keys()
-        df_encoded.plot(x=index,y=col)
-        plt.yticks(positions, labels)
-        plt.title(col)
-        plt.show()
-
-        df[col].value_counts().plot(kind='barh')
-        plt.title(col)
-        plt.show()
+#             df[col].value_counts().plot(kind='barh')
+#             plt.title(col)
+#             plt.show()
     
-    return df_encoded, lst_dct_strings
+    return df_encoded, dct_encoding
 
 
 def convert_0_1(arr, threshold=0.5):
@@ -1321,25 +1391,51 @@ def normalize_df(df):
 def eda_plot(df, index):
     import matplotlib.pyplot as plt
     import seaborn as sns
+    
+    
+    # width, height
+    fig_size_base = (6,6)
+    total_fig = len(df.select_dtypes('number').columns)
+    cols = 6
 
+    rows = total_fig // cols + 1
+
+    # check if you have more space as figures to plot
+    assert rows*cols > total_fig
+    
+    fig_size_hist_line = (cols*fig_size_base[0], 
+                         rows*fig_size_base[1])
+    fig_scale_heatmap = 0.75
+    fig_size_heatmap = (fig_scale_heatmap*fig_size_hist_line[0], 
+                        fig_scale_heatmap*fig_size_hist_line[1])
+    fig_scale_boxplot = 0.25
+    fig_size_boxplot = (fig_scale_boxplot*fig_size_hist_line[0], 
+                        fig_scale_boxplot*fig_size_hist_line[1])
 
     # Histogram
-    fig, ax = plt.subplots(figsize=(40,40))
-    df.drop(columns=[index]).hist(ax=ax)
+    fig, ax = plt.subplots(figsize=fig_size_hist_line)
+    df.drop(columns=[index]).hist(ax=ax, layout=(rows,cols))
     plt.show()
+
     
     # Heatmap
-    plot_heatmap_nr(df.corr(), figsize=(30,30))
+    plot_heatmap_nr(df.corr(), figsize=fig_size_heatmap)
     
     # Line plot
-    df.plot(x=index, subplots=True, sharex=False, layout=(7,6), figsize=(40,40))
+    df.plot(
+        x=index,
+        subplots=True,
+        sharex=False,
+        layout=(rows,cols),
+        figsize=fig_size_hist_line
+    )
     plt.show()
     
     # Boxplot
-    fig, ax = plt.subplots(figsize=(10,10))
+    fig, ax = plt.subplots(figsize=fig_size_boxplot)
     # df_standardized.boxplot(vert=False, ax=ax)
     sns.boxplot(
-        data=standardize_df(df.select_dtypes(exclude=['datetime64[ns]']))
+        data=standardize_df(df.drop(columns=[index]))
         , ax=ax
         , orient='h'
     )
@@ -1352,26 +1448,6 @@ def eda_plot(df, index):
     # )
     plt.show()
     
-    pass
-
-
-def move_legend(ax, new_loc, **kws):
-    """
-    moves a sns legend
-    
-    # examples:
-        # move_legend(ax, "upper left")
-    
-    # out of the graph area
-        move_legend(ax, "upper left", bbox_to_anchor=(1.04,1))
-    
-    # src: https://github.com/mwaskom/seaborn/issues/2280
-    """
-    old_legend = ax.legend_
-    handles = old_legend.legendHandles
-    labels = [t.get_text() for t in old_legend.get_texts()]
-    title = old_legend.get_title().get_text()   
-    ax.legend(handles, labels, loc=new_loc, title=title, **kws)
     pass
     
     
@@ -1456,3 +1532,740 @@ def join_df1_df2_repeated_col(df1, df2):
     
     return df_join.drop(columns=lst_col_r)
 
+
+
+def drop_outliers(df, method='std', value=3):
+    """
+        Drop outliers within a dataframe
+        
+        Args: df: pd.DataFrame with numeric entries
+        method: string ['std','iqr'], default:  'std'
+            'std': check if the data are within a standard range
+            as a z_score in an equivalent normal distribution
+            'iqr': check if the data are within a interquartile range
+            iqr = quantile(0.75) - quantile(0.25)
+        value: float, default 3
+            for 'std' method corresponds to a standard deviation factor 
+            for 'iqr' method corresponds to a interquartile factor
+
+        Return:
+            df_no_outliers: pd.DataFrame without outliers regardless the columns
+
+    src: https://stackoverflow.com/questions/23199796/detect-and-exclude-outliers-in-pandas-data-frame
+    """
+    import numpy as np
+
+    
+    if method == 'std':
+        df_no_outliers = df[df
+              .apply(lambda x: np.abs(x - x.mean()) / x.std() < 3)
+              .all(axis=1)]
+    elif method == 'iqr':
+        df_no_outliers = df[df
+              .apply(lambda x: x.between(
+                  x.quantile(0.25)-value*(x.quantile(0.75)-x.quantile(0.25)),
+                  x.quantile(0.75)+value*(x.quantile(0.75)-x.quantile(0.25))))
+              .all(axis=1)]
+
+    return df_no_outliers
+
+
+
+def detect_outliers(df, method='std', value=3):
+    """
+        Detect outliers within a dataframe
+        
+        Args: df: pd.DataFrame with numeric entries
+        method: string ['std','iqr'], default:  'std'
+            'std': check if the data are within a standard range
+            as a z_score in an equivalent normal distribution
+            'iqr': check if the data are within a interquartile range
+            iqr = quantile(0.75) - quantile(0.25)
+        value: float, default 3
+            for 'std' method corresponds to a standard deviation factor 
+            for 'iqr' method corresponds to a interquartile factor
+
+        Return:
+            df_outliers: pd.DataFrame with the outliers regardless the columns
+    """
+    
+    import numpy as np
+    import pandas as pd
+
+    if method == 'std':
+        df_outliers = df[df
+              .apply(lambda x: np.abs(x - x.mean()) / x.std() >= value)
+              .any(axis=1)]
+    elif method == 'iqr':
+        # iqr = df.quantile(0.75) - df.quantile(0.25)
+        # lim_inf = df.quantile(0.25) - 1.5*iqr
+        # lim_sup = df.quantile(0.75) + 1.5*iqr
+        df_outliers_inf = df[df
+              .apply(lambda x: x <= x.quantile(0.25) 
+                                - value * (x.quantile(0.75) - x.quantile(0.25)))
+              .any(axis=1)]
+        df_outliers_sup = df[df
+              .apply(lambda x: x >= x.quantile(0.75) 
+                                + value * (x.quantile(0.75) - x.quantile(0.25)))
+              .any(axis=1)]
+        df_outliers = pd.concat([df_outliers_inf, df_outliers_sup]).drop_duplicates()
+
+    return df_outliers
+    
+    
+def get_df_stats(df):
+    
+    df_stats = df.describe().T
+    df_stats['IQR'] = df_stats['75%'] - df_stats['25%']
+    # df_stats['lim_inf_1.5IQR'] = df_stats['25%'] - 1.5 * df_stats['IQR']
+    df_stats['lim_inf_1.5IQR'] = df.quantile(0.25) - 1.5*(df.quantile(0.75) - df.quantile(0.25))
+    df_stats['lim_inf_3std'] = df.mean()-3*df.std()
+    # df_stats['lim_sup_1.5IQR'] = df_stats['75%'] + 1.5 * df_stats['IQR']
+    df_stats['lim_sup_1.5IQR'] = df.quantile(0.75) + 1.5*(df.quantile(0.75) - df.quantile(0.25))
+    df_stats['lim_sup_3std'] = df.mean()+3*df.std() 
+    
+    return df_stats.T
+
+
+
+def get_tscv_index(y, test_idx_start, test_size=1):
+    """
+    Args: 
+        y: numpy array to get number of elements
+        test_idx_start: int where the first test start
+        test_size: int number of elements in test (default=1)
+    
+    Return:
+        lst_train_idx: lst with np.array with indexes
+            for n_splits time series
+            each one starting from 0 and finishing at (test_idx_start-1) + ii
+            where ii ranges from 0 to n_splits
+        lst_test_idx: lst with with np.array with indexes
+            for all time series cross validate sequence
+            from (train_idx_start+1)+ii to (train_idx_start+1)+ii + test_size
+            up to the last element in y
+            
+    Minimum example:
+        
+        import numpy as np
+        
+        len_y = 7
+        test_size = 2
+        test_idx_start = 3
+        
+        X = np.random.randn(len_y, 2)
+        y = np.random.randint(0, 2, len_y)
+        lst_train_idx, lst_test_idx = get_tscv_index(y, test_idx_start, test_size)
+        
+        # test_idx_start_last = len_y-test_size
+        n_splits = (len_y-test_size) - test_idx_start + 1
+
+        assert len(lst_train_idx) == len(lst_test_idx)
+        assert len(lst_train_idx) == n_splits
+        
+        print(f"n_splits: {n_splits}\n")
+        
+        for idx, train_index in enumerate(lst_train_idx):
+            test_index = lst_test_idx[idx]
+            print(f"Train: idx: {train_index}\t\t Test: idx: {test_index}")
+
+        '''
+        Out:
+        
+        n_splits: 3
+        
+        Train: idx: [0 1 2]		     Test: idx: [3 4]
+        Train: idx: [0 1 2 3]		 Test: idx: [4 5]
+        Train: idx: [0 1 2 3 4]		 Test: idx: [5 6]
+        '''
+    
+    """
+    
+    import numpy as np
+    
+    n_splits = (len(y)-test_size) - test_idx_start + 1
+    lst_train_idx = [np.arange(test_idx_start+ii) for ii in range(n_splits)]
+    lst_test_idx = [(test_idx_start+ii)+np.arange(test_size) for ii in range(n_splits)]
+    
+    return lst_train_idx, lst_test_idx
+
+
+def get_tscv_X_y(X, y, lst_train_idx, lst_test_idx):
+    lst_X_train = [X[ii] for ii in lst_train_idx]
+    lst_X_test = [X[ii] for ii in lst_test_idx]
+    
+    lst_y_train = [y[ii] for ii in lst_train_idx]
+    lst_y_test = [y[ii] for ii in lst_test_idx]
+    
+    return lst_X_train, lst_X_test, lst_y_train, lst_y_test
+
+    
+def get_X_y(df, lst_col_X, target):
+    X = df[lst_col_X].values
+    y = df[target].values.ravel()
+    
+    return X, y
+    
+
+def get_rank_col(df):
+    rank = df.columns[df.columns.str.endswith('_rank')][0]
+    return rank
+
+def plot_eda_results(df, metric, hue, plot, n=False):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    
+    if n:
+        df = df.sort_values(by=get_rank_col(df)).head(n)
+    
+    fig, ax = plt.subplots()
+    
+    if plot=='hist':
+        sns.histplot(
+            data=df,
+            x=metric,
+            hue=hue,
+            multiple="stack",
+            palette='deep'
+        )
+        move_legend(ax, "upper left", bbox_to_anchor=(1.04,1))
+    elif plot=='boxplot':
+        sns.boxplot(data=df, x=metric, y=hue)
+        plt.ylabel(None)
+        if hue == 'n_var':
+            print('#TODO: check this')
+#             n=10
+#             start, end = ax.get_xlim()
+#             positions = np.linspace(start, end, n)
+#             labels = np.linspace(df[metric].min(), df[metric].max(), n)
+#             plt.xticks(positions, labels)
+#             import matplotlib.ticker as ticker
+#             ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%0.1f'))
+    elif plot =='scatter' and n:
+        sns.scatterplot(
+            data=df,
+            x=metric,
+            y='lst_col_str',
+            hue='model'
+        )      
+
+    if metric == 'matthews_corrcoef':#'f1_score':
+        target_val = 1
+        problema = 'classificadores'
+    elif metric == 'mean_squared_error':
+        target_val = 0
+        problema = 'regressores'
+    
+    if hue == 'model':
+        text_var = 'modelos'
+    elif hue == 'n_var':
+        text_var = 'número de variáveis'
+    elif hue == 'lst_col_str':
+        text_var = 'variáveis'
+        
+    
+    plt.title(f'Desempenho de {df.shape[0]} {problema}, \n considerando {text_var}')
+    plt.xlabel(f'{metric} (quanto mais próximo de {target_val} melhor)')
+    plt.show()
+    
+    pass
+
+def table_results(dct_base, df, metric, index, figsize, n=10):
+    # TODO: ABSTRAIR
+    # DEPENDE DO FRAMEWORK DO ARQUIVO
+    
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    
+    df = df.sort_values(by=get_rank_col(df)).head(n)
+    df[metric] = df[metric].round(2)
+    
+    if index == 'lst_col_str':
+        df = df[[index, 'model', metric]].set_index(index)
+    elif index == 'model':
+        df = df[[index, metric]+dct_base['lst_col_selected']].set_index(index).T       
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.axis("off")
+    pd.plotting.table(ax, df)
+    plt.show()
+    pass
+
+def eda_results_clf_reg(dct_base, df_results, metric):
+    # TODO: ABSTRAIR
+    # DEPENDE DO FRAMEWORK DO ARQUIVO
+    
+    import pandas as pd
+    
+    plot_eda_results(df=df_results, metric=metric, hue='model', plot='boxplot')
+    plot_eda_results(df=df_results, metric=metric, hue='model', plot='hist')
+    # plot_eda_results(df=df_results, metric=metric, hue='n_var', plot='boxplot')
+    plot_eda_results(df=df_results, metric=metric, hue='n_var', plot='hist')
+    plot_eda_results(df=df_results, metric=metric, hue='lst_col_str', plot='hist', n=10)
+    plot_eda_results(df=df_results, metric=metric, hue='model', plot='scatter', n=20)
+
+    table_results(dct_base, df_results, metric, index='lst_col_str', figsize=(3,0.1), n=10)
+    table_results(dct_base, df_results, metric, index='model', figsize=(15,0.1), n=10)
+        
+    # metric stats for each algorithm
+    pd.options.display.latex.repr=True
+    display(df_results
+     .groupby('model')[[metric]]
+     .agg(['min','max','median','std','mean'])
+     .sort_values(by=[(metric, 'median')], ascending=False))
+    pd.options.display.latex.repr=False
+    
+    rank_col = get_rank_col(df_results)
+    
+    print('Distribuição dos melhores algoritmos de cada conjunto de variáveis.')
+    # best classifier for each variables set
+    best_model_each_var_set = (
+        df_results
+        .sort_values(rank_col)
+        .drop_duplicates(['lst_col_str'])
+    )
+    # ut.display_full(
+    #     best_model_each_var_set
+    #     [['clf_rank','model',metric]+lst2]
+    #     .head(5)
+    # )
+
+    # maior ocorrência dos algoritmos
+    pd.options.display.latex.repr=True
+    display(best_model_each_var_set['model'].value_counts())
+    pd.options.display.latex.repr=False
+    
+    pass
+
+def get_lst_features(lst_col_selected, index, target):
+    lst_features = [x for x in lst_col_selected if x not in [index, target]]
+    return lst_features
+
+def get_df_results(dct_model, dct_base):
+    # TODO: ABSTRAIR
+    # DEPENDE DO FRAMEWORK DO ARQUIVO
+    import pandas as pd
+    
+    df_results = pd.DataFrame.from_dict(dct_model, orient='index')
+    
+    df_results['lst_col_str'] = df_results['lst_features'].apply(
+        lambda x: ', '.join(map(str, x)))
+    
+    df_results[dct_base['lst_col_selected']] = 0
+    
+    for col in dct_base['lst_col_selected']:
+        mask = df_results['lst_col_str'].str.contains(col, regex=False)
+        df_results.loc[mask, col] = 1
+    
+    return df_results
+
+def get_df_results_reg(dct_reg, dct_base, metric_reg):
+    df_results_reg = get_df_results(dct_reg, dct_base)
+    
+    # results regression
+    df_results_reg = df_results_reg.drop(
+        columns=["reg","scaler_x","scaler_y",
+                 "y_pred","y_test","y_pred_train",
+                 "annotation_string"]
+    )
+    # overall best regressors
+    df_results_reg['reg_rank'] = df_results_reg[metric_reg].rank()
+    
+    return df_results_reg
+
+def get_pred_train_test(dct_reg, ii):
+    import numpy as np    
+    
+    y_pred_whole_series = np.concatenate( (
+            dct_reg[ii]["y_pred_train"], 
+            dct_reg[ii]["y_pred"]
+        ))
+    return y_pred_whole_series
+
+def plot_reg(df_no_miss_data_reg, df_results_reg, dct_reg, index, target, test_start_idx_reg, metric_reg, ii):
+    # TODO: ABSTRAIR
+    # DEPENDE DO FRAMEWORK DO ARQUIVO
+    
+    import matplotlib.pyplot as plt
+    
+    y_pred_whole_series = get_pred_train_test(dct_reg, ii)
+    
+    df_no_miss_data_reg.plot(x=index, y=target, kind="scatter")
+    plt.plot(df_no_miss_data_reg[index], y_pred_whole_series, color="red")
+    rank = int(df_results_reg["reg_rank"].iloc[ii])
+    plt.title(f'{dct_reg[ii]["model"]}: {rank}/{len(dct_reg)}')
+    plt.axvline(x=(df_no_miss_data_reg[index]
+                   .iloc[test_start_idx_reg]),
+                linewidth=1, color='k')
+    plt.xlabel(index)
+    plt.annotate(fr'{dct_reg[ii]["annotation_string"]}',
+                 xy=(1.04, 0.60), xycoords='axes fraction')
+    plt.annotate(f'ID: {ii}\n{metric_reg}: {dct_reg[ii][metric_reg]:.3f}',
+                xy=(1.04, 0.1), xycoords='axes fraction')
+    plt.show()
+    
+    pass
+
+def get_dct_coef(algoritmo, lst_features, model):
+    if (algoritmo in ["Decision tree", "Random forest"]) and len(lst_features)>1:               
+        dct_coef = dict(zip(lst_features, model.feature_importances_))
+    elif algoritmo == "Regressão linear":
+        dct_coef = dict(zip(lst_features, model.coef_[0]))
+        dct_coef["Constante"] = model.intercept_[0]
+    else:
+        dct_coef = {}
+    
+    return dct_coef
+
+def get_annotation_string(algoritmo, lst_features, dct_coef):
+    # TODO: ABSTRAIR
+    # DEPENDE DO FRAMEWORK DO ARQUIVO
+    if not dct_coef:
+        iterable = lst_features
+        name = "Features"
+    else:
+        iterable = { f'{k}: {round(v, 3)}' for k,v in dct_coef.items() } 
+        
+        if algoritmo == "Regressão linear":
+            name = "Coeficientes"
+    
+        elif (algoritmo in ["Decision tree", "Random forest"]) and len(lst_features)>1:
+            name = "Feature importance"        
+    
+    annotation_string = f'{name}:\n' + '\n'.join(iterable)
+    
+    return annotation_string
+
+
+def plot_confusion_matrix(dct_clf, ii):
+    # TODO: ABSTRAIR
+    # DEPENDE DO FRAMEWORK DO ARQUIVO
+    
+    import matplotlib.pyplot as plt
+    
+    make_confusion_matrix(
+        dct_clf[ii]['confusion_matrix_test'],
+        group_names=[f"tn\npreviu descida\ne desceu",
+                     f"fp\npreviu subida\ne desceu",
+                     f"fn\npreviu descida\ne subiu",
+                     f"tp\npreviu subida\ne subiu",],
+        categories=["descida","subida"]
+    )
+    plt.text(1.32,2.49,'taxa de acerto nas previsões')
+    plt.text(1.32,2.58,'taxa de acerto quando previu subida')
+    plt.text(1.32,2.69,'taxa de acerto quando subiu')
+    
+    pass 
+
+def plot_errors_clf(df_encoded_raw, df_results_clf, dct_clf, index, target, test_start_idx_clf, ii):
+    # TODO: ABSTRAIR
+    # DEPENDE DO FRAMEWORK DO ARQUIVO
+    import matplotlib.pyplot as plt
+    
+    fig, ax = plt.subplots()
+    # Errors representation
+    df_encoded_raw.iloc[test_start_idx_clf:].plot(x=index, y=target, ax=ax)
+    df_encoded_raw.iloc[dct_clf[ii]['fp']].plot(x=index, y=target, kind='scatter', color='green', marker='^', ax=ax)
+    df_encoded_raw.iloc[dct_clf[ii]['fn']].plot(x=index, y=target, kind='scatter', color='red', marker='v', ax=ax)
+    plt.legend(['real','fp: previu subida e desceu','fn: previu descida e subiu'])#, title=row['model'])
+    move_legend(ax, "upper left", bbox_to_anchor=(1.04,1))
+
+    rank = df_results_clf["clf_rank"].iloc[ii]
+
+    rank = int(rank) if ((rank % 1) < 0.1) else rank  # keep decimal if tied
+
+    plt.title(f'{dct_clf[ii]["model"]}: {rank}/{len(dct_clf)}')
+    plt.xlabel(index)
+    plt.ylabel(target)
+    plt.annotate(fr'{dct_clf[ii]["annotation_string"]}',
+                 xy=(1.04, 0.30), xycoords='axes fraction') 
+    plt.annotate(f'ID: {ii}',
+                xy=(1.04, 0.1), xycoords='axes fraction')
+    plt.show()
+    
+    plot_confusion_matrix(dct_clf, ii)
+    
+    pass
+
+ 
+def count_consecutive_items_n_cols(df, col_name_list, output_col):
+    """
+    
+        source: https://stackoverflow.com/questions/25119524/pandas-conditional-rolling-count
+    """
+    cum_sum_list = [
+        (df[col_name] != df[col_name].shift(1)).cumsum().tolist() 
+        for col_name in col_name_list
+    ]
+    df_out = df.copy()
+    df_out[output_col] = df[col_name_list].groupby(
+        ["_".join(map(str, x)) for x in zip(*cum_sum_list)]
+    ).cumcount() + 1
+    return df_out
+
+def add_col_max_sequence_event_count(df, col):
+    """
+        source: https://stackoverflow.com/questions/66822515/how-to-repeat-the-cumsum-for-previous-values-in-a-pandas-series-when-the-count
+    
+    """
+    df_out = df.copy()
+    df_out[col+'_max'] = df[col].groupby(df[col].eq(1).cumsum()).transform('max')
+    return df_out 
+    
+def multiline(xs, ys, c, ax=None, **kwargs):
+    """Plot lines with different colorings
+
+    Parameters
+    ----------
+    xs : iterable container of x coordinates
+    ys : iterable container of y coordinates
+    c : iterable container of numbers mapped to colormap
+    ax (optional): Axes to plot on.
+    kwargs (optional): passed to LineCollection
+
+    Notes:
+        len(xs) == len(ys) == len(c) is the number of line segments
+        len(xs[i]) == len(ys[i]) is the number of points for each line (indexed by i)
+
+    Returns
+    -------
+    lc : LineCollection instance.
+    
+    
+    Source:
+    https://stackoverflow.com/questions/38208700/matplotlib-plot-lines-with-colors-through-colormap
+    """
+    
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+
+    # find axes
+    ax = plt.gca() if ax is None else ax
+
+    # create LineCollection
+    segments = [np.column_stack([x, y]) for x, y in zip(xs, ys)]
+    lc = LineCollection(segments, **kwargs)
+
+    # set coloring of line segments
+    #    Note: I get an error if I pass c as a list here... not sure why.
+    lc.set_array(np.asarray(c))
+
+    # add lines to axes and rescale 
+    #    Note: adding a collection doesn't autoscale xlim/ylim
+    ax.add_collection(lc)
+    ax.autoscale()
+    
+    return lc
+ 
+ 
+ 
+def get_cols_date(df_in, index):
+    
+    df = df_in.copy()
+    
+    df['year'] = df[index].dt.year
+    df['month'] = df[index].dt.month
+       
+    dct_dt = {
+        'bimester': 2,
+        'trimester': 3,  # quarter
+        'quadrimester': 4,
+        'semester': 6
+    }
+
+    for period, n_months in dct_dt.items():
+        df[period] = df['month'].apply(
+            lambda month: 
+            (month-1)//n_months + 1 
+    #         n_months_group(month, n_months)
+        )
+    
+    return df
+
+def get_ano_safra(month, year, safra_start_month):
+    return f'{year}-{year+1}' if (month>=safra_start_month) else f'{year-1}-{year}'
+    
+
+def plot_limit_pct_change(df, col, index, pct_change):
+    import matplotlib.pyplot as plt
+    # import matplotlib.ticker as mtick
+    from matplotlib.ticker import FuncFormatter
+
+    ax = df[[col]].pct_change().set_index(df[index]).plot(legend=False)
+
+    for y in [-pct_change, pct_change]:
+        ax.hlines(y=y,
+                  xmin=df[index].iloc[0],
+                  xmax=df[index].iloc[-1],
+                  colors='black',
+                  linestyle='dashed'
+                 )
+    # ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0, decimals=0))
+    ax.yaxis.set_major_formatter(FuncFormatter('{0:.0%}'.format))
+
+    plt.ylabel('Variação percentual '+col)
+    # plt.legend()
+    plt.show()  
+    pass
+    
+
+def get_3_classes(x, pct_change):
+    import numpy as np
+    
+
+    if np.isnan(x):
+        return np.nan
+    elif x > pct_change:
+        return 1    # increase
+    elif x < -pct_change:
+        return -1   # decrease
+    elif (x >= -pct_change) and (x <= pct_change): 
+        return 0    # stagnation
+    else:
+        print(x, type(x))
+        raise Exception('Not should be here')
+        
+
+def plot_col_level_vs_target(df, index, target_reg, pct_change_over_name, col, bins):
+
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+   
+    # import utils as ut
+    
+    col_level = col+'_'+''.join([str(x) for x in range(bins)])
+    
+    cm = sns.color_palette("RdBu", bins)
+      
+    fig, ax = plt.subplots()
+    sns.scatterplot(
+        data=df,
+        x=index,
+        y=target_reg,
+        hue=col_level,
+        palette=cm,
+        style=pct_change_over_name,
+        markers=['v','s','^']
+    )
+    # ut.move_legend
+    move_legend(ax, "upper left", bbox_to_anchor=(1.04,1))
+    plt.show()
+    
+    pass
+    
+
+def get_level_col(df, col, bins):
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    
+    import pprint
+    
+#     import utils as ut
+
+    col_level = col+'_'+''.join([str(x) for x in range(bins)])
+    
+    cut = pd.cut(df[col], bins=bins)
+    dct = dict(zip(sorted(set(cut.dropna().to_list())), [x for x in range(bins)]))
+    df[col_level] = cut.map(dct).astype(float)
+    
+    pprint.pprint(dct)
+       
+    df[[col, col_level]].hist(figsize=(10,5))#, bins=bins)
+    plt.show()
+   
+    return dct, col_level
+    
+    
+def plot_feature_importance(clf, lst_col):
+
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    
+    col = 'feature_importances'
+    (pd.DataFrame(
+        data=clf.feature_importances_,
+        index=lst_col,
+        columns=[col]).sort_values(by=[col])
+     .plot(kind='barh'))
+    plt.show()
+    
+    pass 
+    
+
+def plot_pair_vs_target_clf(df, target_clf):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+
+
+    g = sns.PairGrid(
+        df,
+        diag_sharey=False, 
+        corner=True,
+        hue=target_clf,
+        palette=['orange', 'blue']
+    )
+    g.map_lower(sns.scatterplot)
+
+    # g.map_lower(sns.residplot)
+    # g.map_upper(sns.regplot)
+
+    # https://stackoverflow.com/questions/57644355/stacked-barchart-in-pairgrid-python-seaborn
+    # below for the histograms on the diagonal
+    d = {}
+    def func(x, **kwargs):
+        ax = plt.gca()
+
+        if not ax in d.keys():
+            d[ax] = {"data" : [], "color" : []}
+        d[ax]["data"].append(x)
+        d[ax]["color"].append(kwargs.get("color"))
+
+    g.map_diag(func)
+    for ax, dic in d.items():
+        ax.hist(dic["data"], color=dic["color"], histtype="barstacked")
+
+    # g.map_diag(sns.histplot)
+    # g.map_diag(sns.kdeplot)
+    g.add_legend()
+    plt.show()
+    
+    pass
+
+
+def plot_col_vs_target_time(df_standardized, index, col, target, dct_encoding):
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import AutoLocator
+    
+    fig, ax = plt.subplots()
+    df_standardized.plot(x=index,y=[col,target], ax=ax)
+    plt.legend(bbox_to_anchor=(1.04,1), loc="upper left")
+    if col in dct_encoding.keys(): 
+        positions = tuple(df_standardized[col].unique())
+#             labels = list(lst_dct_strings[lst_col_string.index(col)].values())[0].keys()
+        # labels = list(dct_encoding[col])[0].keys()
+        labels = dct_encoding[col].keys()
+        plt.yticks(positions, labels)
+        secax = ax.secondary_yaxis('right')
+        secax.yaxis.set_major_locator(AutoLocator())
+    plt.show()
+    pass
+    
+    
+def get_IQR(s):
+    import numpy as np
+
+    return np.subtract(*np.percentile(s, [75, 25]))
+#    return s.quantile(.75) - s.quantile(.25)
+    
+def get_bins_number(s):
+    # https://stats.stackexchange.com/questions/798/calculating-optimal-number-of-bins-in-a-histogram
+    # https://en.wikipedia.org/wiki/Freedman%E2%80%93Diaconis_rule
+    iqr = get_IQR(s)
+    
+    def get_bins_width(iqr, n):
+        return 2 * iqr * n ** (-1/3)
+   
+    bins_width = get_bins_width(iqr, len(s))
+
+    return round( (max(s) - min(s)) / bins_width )
